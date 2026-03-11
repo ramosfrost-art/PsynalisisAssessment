@@ -4,12 +4,15 @@
 <meta charset="UTF-8">
 <title>Ψ Psynalisis Test</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
 <style>
+
 body {
   font-family: Arial, sans-serif;
   text-align: center;
   margin: 20px;
   background: #f8f8f8;
+  overflow-x: hidden;
 }
 
 h1 {
@@ -60,48 +63,105 @@ button:disabled {
   cursor: not-allowed;
 }
 
-#terminate {
-  background-color: red;
-  color: white;
-  margin-top: 15px;
-}
-
-#resultCard {
-  display: none;
-  background: #fff;
-  border: 2px solid #333;
-  border-radius: 12px;
-  padding: 20px;
-  margin: 20px auto;
-  max-width: 350px;
-  box-shadow: 0 4px 10px rgba(0,0,0,0.15);
-}
-
-#resultText {
-  font-size: 1.2em;
-  margin-bottom: 15px;
-}
-
-#collectBtn {
-  background-color: #28a745;
-  color: white;
-  width: 80%;
-  max-width: 250px;
-}
-
 #timerBox {
   position: fixed;
   top: 12px;
   right: 16px;
   background: white;
   border: 2px solid #333;
-  border-radius: 8px;
-  padding: 6px 10px;
-  font-size: 0.9em;
+  border-radius: 12px;
+  padding: 10px 14px;
+  font-size: clamp(1rem, 2.5vw, 1.3rem);
   font-weight: bold;
+  z-index: 1000;
+  box-shadow: 0 4px 10px rgba(0,0,0,0.15);
 }
+
+/* Floating researcher terminate button */
+
+#terminateBtn {
+
+  position: fixed;
+  bottom: 18px;
+  right: 18px;
+
+  width: 44px;
+  height: 44px;
+
+  border-radius: 50%;
+  border: none;
+
+  background: red;
+  color: white;
+
+  font-size: 20px;
+  font-weight: bold;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  cursor: pointer;
+
+  z-index: 1500;
+
+  box-shadow: 0 4px 10px rgba(0,0,0,0.25);
+}
+
+#terminateBtn:hover{
+  transform: scale(1.1);
+}
+
+/* Modal overlay */
+
+#modalOverlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.45);
+  z-index: 1999;
+}
+
+#resultCard {
+  display: none;
+
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+
+  background: #fff;
+  border: 2px solid #333;
+  border-radius: 16px;
+
+  padding: 22px;
+
+  width: min(85vw, 360px);
+
+  box-shadow: 0 6px 18px rgba(0,0,0,0.25);
+
+  z-index: 2000;
+}
+
+#resultText {
+  font-size: 1.2em;
+  margin-bottom: 15px;
+  line-height: 1.5;
+}
+
+#collectBtn {
+  background-color: #28a745;
+  color: white;
+  width: 100%;
+}
+
+body.modal-open {
+  overflow: hidden;
+}
+
 </style>
 </head>
+
 <body>
 
 <div id="timerBox">Time: --:--</div>
@@ -119,12 +179,15 @@ button:disabled {
   <button class="deckBtn" onclick="chooseDeck('D')">Deck D</button>
 </div>
 
+<div id="modalOverlay"></div>
+
 <div id="resultCard">
   <div id="resultText"></div>
   <button id="collectBtn" onclick="collectPoints()">Collect Points</button>
 </div>
 
-<button id="terminate" onclick="terminateTask()">Terminate Task</button>
+<!-- Floating researcher button -->
+<button id="terminateBtn" onclick="terminateTask()">T</button>
 
 <script>
 
@@ -179,6 +242,7 @@ function setDeckButtonsEnabled(enabled) {
 }
 
 function updateTimerDisplay() {
+
   const minutes = Math.floor(totalSeconds / 60);
   const seconds = totalSeconds % 60;
 
@@ -187,6 +251,16 @@ function updateTimerDisplay() {
     String(minutes).padStart(2, "0") +
     ":" +
     String(seconds).padStart(2, "0");
+}
+
+function showResultModal() {
+  document.getElementById("modalOverlay").style.display = "block";
+  document.getElementById("resultCard").style.display = "block";
+}
+
+function hideResultModal() {
+  document.getElementById("modalOverlay").style.display = "none";
+  document.getElementById("resultCard").style.display = "none";
 }
 
 // Timer
@@ -205,7 +279,6 @@ function startTimer() {
     }
 
     totalSeconds--;
-
   }
 
   updateTimer();
@@ -245,7 +318,6 @@ function downloadCSV(results) {
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
-
 }
 
 // Choose deck
@@ -270,11 +342,10 @@ function chooseDeck(deck) {
       loss = 250;
     }
 
-  } else if (deck === "C" || deck === "D") {
+  } else {
 
     gain = 50;
     loss = CD_outcomes[trial];
-
   }
 
   net = gain - loss;
@@ -298,8 +369,7 @@ function chooseDeck(deck) {
     Net: $${net}
   `;
 
-  document.getElementById("resultCard").style.display = "block";
-
+  showResultModal();
 }
 
 // Collect points
@@ -326,19 +396,28 @@ function collectPoints() {
   pendingResult = null;
   awaitingCollect = false;
 
-  document.getElementById("resultCard").style.display = "none";
+  hideResultModal();
 
   if (trial >= nTrials) {
     endTask();
   } else {
     setDeckButtonsEnabled(true);
   }
-
 }
 
-// End
+// PASSWORD TERMINATE
 function terminateTask() {
-  endTask();
+
+  const password = prompt("Enter researcher password to terminate:");
+
+  if (password === "2022315101") {
+    endTask();
+  } else if (password === null) {
+    return;
+  } else {
+    alert("Incorrect password.");
+  }
+
 }
 
 function endTask() {
@@ -348,8 +427,7 @@ function endTask() {
   taskEnded = true;
 
   setDeckButtonsEnabled(false);
-
-  document.getElementById("resultCard").style.display = "none";
+  hideResultModal();
 
   if (timerInterval) clearInterval(timerInterval);
 
@@ -366,10 +444,8 @@ function endTask() {
 
   updateTrialDisplay();
   updateTimerDisplay();
-
 }
 
-// Initial display
 updateScoreDisplay();
 updateTrialDisplay();
 updateTimerDisplay();
