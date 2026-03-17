@@ -347,7 +347,6 @@
   <div class="page">
     <div class="app-card">
 
-      <!-- SETUP PAGE -->
       <div id="setupScreen">
         <h1>Ψ Psynalisis Test</h1>
         <p class="subtitle">Participant Sign-In</p>
@@ -386,7 +385,6 @@
         </div>
       </div>
 
-      <!-- TEST PAGE -->
       <div id="testScreen" class="hidden">
         <div class="topbar">
           <div id="timerBox">Time: --:--</div>
@@ -429,10 +427,25 @@
 
   <button id="terminateBtn" onclick="terminateTask()">T</button>
 
-<script>
-  // Google Sheet Web App URL
-  const googleSheetURL = "https://script.google.com/macros/s/AKfycbzM1iHnIC1SNEJRqvCxnHVyMd8_m9eQ7We0bVWcrHUph7vms8eXNfIJLnMvUPGD6X-3wg/exec";
+  <!-- Firebase -->
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
 
+<script>
+const firebaseConfig = {
+  apiKey: "AIzaSyAyWp6rhJ1PKkbWEJU6ZLI48EgjjwHXcYA",
+  authDomain: "psynalisis-test.firebaseapp.com",
+  projectId: "psynalisis-test",
+  storageBucket: "psynalisis-test.firebasestorage.app",
+  messagingSenderId: "178907265106",
+  appId: "1:178907265106:web:a762343f8ef2a41a5ac78b",
+  measurementId: "G-03NQ8PZM51"
+};
+
+firebase.initializeApp(firebaseConfig);
+const db = firebase.firestore();
+</script>
+<script>
   // Participant info
   let participantID = "";
   let participantGender = "";
@@ -463,10 +476,76 @@
     CD_outcomes.push(i % 2 === 0 ? 0 : 50);
   }
 
+  function normalizeID(id) {
+    return id.trim().toUpperCase();
+  }
+
+  function getSessionKey(id) {
+    return "IGT_SESSION_" + normalizeID(id);
+  }
+
+  function saveLocalData() {
+    if (!participantID) return;
+
+    const sessionData = {
+      participantID,
+      gender: participantGender,
+      yearLevel: participantYearLevel,
+      timerMinutes,
+      totalSeconds,
+      trial,
+      totalScore,
+      results,
+      taskEnded
+    };
+
+    localStorage.setItem(getSessionKey(participantID), JSON.stringify(sessionData));
+  }
+
+  function loadLocalDataByID(id) {
+    const saved = localStorage.getItem(getSessionKey(id));
+    if (!saved) return null;
+
+    try {
+      return JSON.parse(saved);
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function clearLocalData() {
+    if (!participantID) return;
+    localStorage.removeItem(getSessionKey(participantID));
+  }
+
+  function restoreSession(savedData) {
+    participantID = savedData.participantID;
+    participantGender = savedData.gender;
+    participantYearLevel = savedData.yearLevel;
+    timerMinutes = savedData.timerMinutes;
+    totalSeconds = savedData.totalSeconds;
+    trial = savedData.trial;
+    totalScore = savedData.totalScore;
+    results = savedData.results || [];
+    taskEnded = false;
+    timerStarted = false;
+    awaitingCollect = false;
+    pendingResult = null;
+
+    document.getElementById("setupScreen").classList.add("hidden");
+    document.getElementById("testScreen").classList.remove("hidden");
+
+    updateScoreDisplay();
+    updateTrialDisplay();
+    updateTimerDisplay();
+    setDeckButtonsEnabled(true);
+  }
+
   function startExperiment() {
     const genderEl = document.querySelector('input[name="gender"]:checked');
     const yearEl = document.querySelector('input[name="yearLevel"]:checked');
-    const participantInput = document.getElementById("participantNumberInput").value.trim();
+    const participantInputRaw = document.getElementById("participantNumberInput").value;
+    const participantInput = normalizeID(participantInputRaw);
     const timerInputValue = parseInt(document.getElementById("timerInput").value, 10);
     const setupError = document.getElementById("setupError");
 
@@ -476,11 +555,31 @@
       return;
     }
 
+    const savedData = loadLocalDataByID(participantInput);
+
+    if (savedData && !savedData.taskEnded) {
+      const resume = confirm("Saved progress found for this participant ID. Resume previous session?");
+      if (resume) {
+        restoreSession(savedData);
+        return;
+      }
+    }
+
     participantGender = genderEl.value;
     participantYearLevel = yearEl.value;
     participantID = participantInput;
     timerMinutes = timerInputValue;
     totalSeconds = timerMinutes * 60;
+
+    trial = 0;
+    results = [];
+    totalScore = 2000;
+    taskEnded = false;
+    timerStarted = false;
+    awaitingCollect = false;
+    pendingResult = null;
+
+    saveLocalData();
 
     document.getElementById("setupScreen").classList.add("hidden");
     document.getElementById("testScreen").classList.remove("hidden");
@@ -488,9 +587,9 @@
     updateScoreDisplay();
     updateTrialDisplay();
     updateTimerDisplay();
+    setDeckButtonsEnabled(true);
   }
 
-  // UI
   function updateScoreDisplay() {
     document.getElementById("scoreBox").textContent = totalScore;
   }
@@ -526,19 +625,19 @@
     document.body.classList.remove("modal-open");
   }
 
-  function showCompletionMessage(fileName, fileURL) {
+  function showCompletionMessage(fileName, fileURL, uploadStatusText) {
     const completionBox = document.getElementById("completionBox");
 
     completionBox.style.display = "block";
     completionBox.innerHTML = `
       <strong>Thank you for participating!</strong><br>
+      ${uploadStatusText}<br>
       The results file should download automatically.<br>
       If it did not download, use the button below.<br><br>
       <a href="${fileURL}" download="${fileName}">Download Backup File</a>
     `;
   }
 
-  // Timer
   function startTimer() {
     function updateTimer() {
       if (taskEnded) return;
@@ -552,13 +651,13 @@
       }
 
       totalSeconds--;
+      saveLocalData();
     }
 
     updateTimer();
     timerInterval = setInterval(updateTimer, 1000);
   }
 
-  // Create CSV blob and file info
   function createCSVFile(results) {
     const headers = [
       "participantID",
@@ -607,7 +706,6 @@
     return { url, filename };
   }
 
-  // Automatic CSV download
   function triggerCSVDownload(fileURL, fileName) {
     const a = document.createElement("a");
     a.hidden = true;
@@ -618,7 +716,6 @@
     document.body.removeChild(a);
   }
 
-  // Choose deck
   function chooseDeck(deck) {
     if (!timerStarted) {
       startTimer();
@@ -665,7 +762,6 @@
     showResultModal();
   }
 
-  // Collect points
   function collectPoints() {
     if (!pendingResult || taskEnded) return;
 
@@ -689,6 +785,7 @@
     awaitingCollect = false;
 
     hideResultModal();
+    saveLocalData();
 
     if (trial >= nTrials) {
       endTask();
@@ -697,7 +794,6 @@
     }
   }
 
-  // PASSWORD TERMINATE
   function terminateTask() {
     const password = prompt("Enter researcher password to terminate:");
 
@@ -710,7 +806,22 @@
     }
   }
 
-  function endTask() {
+  async function saveToFirebase() {
+    const payload = {
+      participantID,
+      gender: participantGender,
+      yearLevel: participantYearLevel,
+      timerMinutes,
+      completedTrials: results.length,
+      finalScore: totalScore,
+      taskEndedAt: new Date().toISOString(),
+      trials: results
+    };
+
+    await db.collection("igt_sessions").doc(participantID).set(payload);
+  }
+
+  async function endTask() {
     if (taskEnded) return;
 
     taskEnded = true;
@@ -719,19 +830,6 @@
     hideResultModal();
 
     if (timerInterval) clearInterval(timerInterval);
-
-    fetch(googleSheetURL, {
-      method: "POST",
-      mode: "no-cors",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        participantID,
-        gender: participantGender,
-        yearLevel: participantYearLevel,
-        timerMinutes,
-        trials: results
-      })
-    }).catch(err => console.error(err));
 
     if (backupCSVUrl) {
       window.URL.revokeObjectURL(backupCSVUrl);
@@ -742,7 +840,20 @@
     backupCSVUrl = csvFile.url;
 
     triggerCSVDownload(csvFile.url, csvFile.filename);
-    showCompletionMessage(csvFile.filename, csvFile.url);
+
+    let uploadStatusText = "Cloud upload was not attempted.";
+
+    try {
+      await saveToFirebase();
+      uploadStatusText = "Cloud backup saved successfully.";
+      clearLocalData();
+    } catch (error) {
+      console.error("Firebase save failed:", error);
+      uploadStatusText = "Cloud backup failed. Local recovery is still available on this device.";
+      saveLocalData();
+    }
+
+    showCompletionMessage(csvFile.filename, csvFile.url, uploadStatusText);
 
     trial = nTrials;
     updateTrialDisplay();
