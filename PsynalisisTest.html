@@ -149,6 +149,34 @@
     box-shadow: none;
   }
 
+  #completionBox {
+    display: none;
+    margin-top: 24px;
+    padding: 18px 16px;
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    background: #f9fafb;
+    text-align: center;
+    line-height: 1.7;
+  }
+
+  #completionBox a {
+  display: inline-block;
+  margin-top: 10px;
+  padding: 12px 18px;
+  border-radius: 12px;
+  background: var(--success);
+  color: #fff;
+  font-weight: 700;
+  text-decoration: none;
+  transition: transform 0.15s ease, opacity 0.15s ease;
+}
+
+#completionBox a:hover {
+  opacity: 0.95;
+  transform: translateY(-1px);
+}
+
   #terminateBtn {
     position: fixed;
     bottom: 18px;
@@ -280,6 +308,8 @@
         <button class="deckBtn" onclick="chooseDeck('C')">Deck C</button>
         <button class="deckBtn" onclick="chooseDeck('D')">Deck D</button>
       </div>
+
+      <div id="completionBox"></div>
     </div>
   </div>
 
@@ -320,6 +350,7 @@
   let totalScore = 2000;
   let awaitingCollect = false;
   let pendingResult = null;
+  let backupCSVUrl = null;
 
   // Outcomes
   let AB_outcomes = [];
@@ -366,6 +397,22 @@
     document.body.classList.remove("modal-open");
   }
 
+ function showCompletionMessage(fileName, fileURL) {
+  const completionBox = document.getElementById("completionBox");
+
+  completionBox.style.display = "block";
+
+  completionBox.innerHTML = `
+    <strong>Thank you for participating!</strong><br>
+    The results file should download automatically.<br>
+    If it did not download, use the button below.<br><br>
+
+    <a href="${fileURL}" download="${fileName}">
+      Download Backup File
+    </a>
+  `;
+}
+
   // Timer
   function startTimer() {
     function updateTimer() {
@@ -386,11 +433,12 @@
     timerInterval = setInterval(updateTimer, 1000);
   }
 
-  // CSV Download
-  function downloadCSV(results) {
-    if (results.length === 0) return;
+  // Create CSV blob and file info
+  function createCSVFile(results) {
+    const keys = results.length > 0
+      ? Object.keys(results[0])
+      : ["trial", "choice", "gain", "loss", "net", "totalScore"];
 
-    const keys = Object.keys(results[0]);
     const csvRows = [keys.join(",")];
 
     results.forEach(row => {
@@ -399,7 +447,6 @@
 
     const blob = new Blob([csvRows.join("\n")], { type: "text/csv" });
     const url = window.URL.createObjectURL(blob);
-    const a = document.createElement("a");
 
     const now = new Date();
     const timestamp =
@@ -410,14 +457,20 @@
       String(now.getMinutes()).padStart(2, "0") +
       String(now.getSeconds()).padStart(2, "0");
 
-    a.hidden = true;
-    a.href = url;
-    a.download = `PsynalisisTest_${participantID}_${timestamp}.csv`;
+    const filename = `PsynalisisTest_${participantID}_${timestamp}.csv`;
 
+    return { url, filename };
+  }
+
+  // Automatic CSV download
+  function triggerCSVDownload(fileURL, fileName) {
+    const a = document.createElement("a");
+    a.hidden = true;
+    a.href = fileURL;
+    a.download = fileName;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
-    window.URL.revokeObjectURL(url);
   }
 
   // Choose deck
@@ -529,12 +582,27 @@
       body: JSON.stringify({ participantID, trials: results })
     }).catch(err => console.error(err));
 
-    downloadCSV(results);
+    if (backupCSVUrl) {
+      window.URL.revokeObjectURL(backupCSVUrl);
+      backupCSVUrl = null;
+    }
+
+    const csvFile = createCSVFile(results);
+    backupCSVUrl = csvFile.url;
+
+    triggerCSVDownload(csvFile.url, csvFile.filename);
+    showCompletionMessage(csvFile.filename, csvFile.url);
 
     trial = nTrials;
     updateTrialDisplay();
     updateTimerDisplay();
   }
+
+  window.addEventListener("beforeunload", () => {
+    if (backupCSVUrl) {
+      window.URL.revokeObjectURL(backupCSVUrl);
+    }
+  });
 
   updateScoreDisplay();
   updateTrialDisplay();
