@@ -17,6 +17,7 @@
     --accent: #374151;
     --success: #2f6f4f;
     --danger: #b91c1c;
+    --info: #2563eb;
   }
 
   * {
@@ -175,17 +176,16 @@
     transform: translateY(-1px);
   }
 
+  #loginBtn,
   #terminateBtn {
     position: fixed;
-    bottom: 18px;
     right: 18px;
-    width: 38px;
-    height: 38px;
+    width: 46px;
+    height: 46px;
     border-radius: 50%;
     border: none;
-    background: var(--danger);
     color: #fff;
-    font-size: 16px;
+    font-size: 15px;
     font-weight: 700;
     display: flex;
     align-items: center;
@@ -196,6 +196,17 @@
     transition: transform 0.15s ease, opacity 0.15s ease;
   }
 
+  #loginBtn {
+    bottom: 72px;
+    background: var(--info);
+  }
+
+  #terminateBtn {
+    bottom: 18px;
+    background: var(--danger);
+  }
+
+  #loginBtn:hover,
   #terminateBtn:hover {
     transform: scale(1.06);
   }
@@ -329,10 +340,15 @@
       font-size: 1.08rem;
     }
 
+    #loginBtn,
     #terminateBtn {
-      width: 36px;
-      height: 36px;
-      font-size: 15px;
+      width: 42px;
+      height: 42px;
+      font-size: 14px;
+    }
+
+    #loginBtn {
+      bottom: 66px;
     }
 
     .option-row {
@@ -425,11 +441,12 @@
     <button id="collectBtn" onclick="collectPoints()">Collect Points</button>
   </div>
 
+  <button id="loginBtn" onclick="participantLogin()">L</button>
   <button id="terminateBtn" onclick="terminateTask()">T</button>
 
   <!-- Firebase -->
   <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
 
 <script>
 const firebaseConfig = {
@@ -445,6 +462,7 @@ const firebaseConfig = {
 firebase.initializeApp(firebaseConfig);
 const db = firebase.firestore();
 </script>
+
 <script>
   // Participant info
   let participantID = "";
@@ -471,10 +489,17 @@ const db = firebase.firestore();
   let AB_outcomes = [];
   let CD_outcomes = [];
 
-  for (let i = 0; i < nTrials; i++) {
-    AB_outcomes.push(Math.random() < 0.5 ? 0 : 1);
-    CD_outcomes.push(i % 2 === 0 ? 0 : 50);
+  function generateOutcomes() {
+    AB_outcomes = [];
+    CD_outcomes = [];
+
+    for (let i = 0; i < nTrials; i++) {
+      AB_outcomes.push(Math.random() < 0.5 ? 0 : 1);
+      CD_outcomes.push(i % 2 === 0 ? 0 : 50);
+    }
   }
+
+  generateOutcomes();
 
   function normalizeID(id) {
     return id.trim().toUpperCase();
@@ -482,6 +507,10 @@ const db = firebase.firestore();
 
   function getSessionKey(id) {
     return "IGT_SESSION_" + normalizeID(id);
+  }
+
+  function getCompletedKey(id) {
+    return "IGT_COMPLETED_" + normalizeID(id);
   }
 
   function saveLocalData() {
@@ -496,14 +525,50 @@ const db = firebase.firestore();
       trial,
       totalScore,
       results,
-      taskEnded
+      taskEnded,
+      timerStarted,
+      AB_outcomes,
+      CD_outcomes
     };
 
     localStorage.setItem(getSessionKey(participantID), JSON.stringify(sessionData));
   }
 
+  function saveCompletedLocalData() {
+    if (!participantID) return;
+
+    const completedData = {
+      participantID,
+      gender: participantGender,
+      yearLevel: participantYearLevel,
+      timerMinutes,
+      totalSeconds,
+      trial,
+      totalScore,
+      results,
+      taskEnded: true,
+      timerStarted,
+      completedAt: new Date().toISOString(),
+      AB_outcomes,
+      CD_outcomes
+    };
+
+    localStorage.setItem(getCompletedKey(participantID), JSON.stringify(completedData));
+  }
+
   function loadLocalDataByID(id) {
     const saved = localStorage.getItem(getSessionKey(id));
+    if (!saved) return null;
+
+    try {
+      return JSON.parse(saved);
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function loadCompletedLocalDataByID(id) {
+    const saved = localStorage.getItem(getCompletedKey(id));
     if (!saved) return null;
 
     try {
@@ -528,17 +593,79 @@ const db = firebase.firestore();
     totalScore = savedData.totalScore;
     results = savedData.results || [];
     taskEnded = false;
-    timerStarted = false;
+    timerStarted = savedData.timerStarted || false;
     awaitingCollect = false;
     pendingResult = null;
 
+    AB_outcomes = Array.isArray(savedData.AB_outcomes) && savedData.AB_outcomes.length === nTrials
+      ? savedData.AB_outcomes
+      : [];
+    CD_outcomes = Array.isArray(savedData.CD_outcomes) && savedData.CD_outcomes.length === nTrials
+      ? savedData.CD_outcomes
+      : [];
+
+    if (AB_outcomes.length !== nTrials || CD_outcomes.length !== nTrials) {
+      generateOutcomes();
+    }
+
+    if (timerInterval) {
+      clearInterval(timerInterval);
+      timerInterval = null;
+    }
+
     document.getElementById("setupScreen").classList.add("hidden");
     document.getElementById("testScreen").classList.remove("hidden");
+    document.getElementById("completionBox").style.display = "none";
+    document.getElementById("completionBox").innerHTML = "";
 
     updateScoreDisplay();
     updateTrialDisplay();
     updateTimerDisplay();
     setDeckButtonsEnabled(true);
+
+    if (timerStarted && !taskEnded && totalSeconds > 0) {
+      startTimer();
+    }
+  }
+
+  function participantLogin() {
+    const input = prompt("Enter your participant number:");
+    if (input === null) return;
+
+    const id = normalizeID(input);
+    if (!id) {
+      alert("Please enter a valid participant number.");
+      return;
+    }
+
+    const savedActiveData = loadLocalDataByID(id);
+
+    if (savedActiveData && !savedActiveData.taskEnded) {
+      restoreSession(savedActiveData);
+      alert("Saved unfinished session loaded successfully.");
+      return;
+    }
+
+    const savedCompletedData = loadCompletedLocalDataByID(id);
+
+    if (savedCompletedData && savedCompletedData.taskEnded) {
+      const redownload = confirm("A completed session was found for this participant. Download the backup CSV again?");
+      if (!redownload) return;
+
+      if (backupCSVUrl) {
+        window.URL.revokeObjectURL(backupCSVUrl);
+        backupCSVUrl = null;
+      }
+
+      const csvFile = createCSVFileFromSavedData(savedCompletedData);
+      backupCSVUrl = csvFile.url;
+      triggerCSVDownload(csvFile.url, csvFile.filename);
+
+      alert("Backup CSV downloaded again.");
+      return;
+    }
+
+    alert("No saved session was found for that participant number on this device.");
   }
 
   function startExperiment() {
@@ -565,6 +692,11 @@ const db = firebase.firestore();
       }
     }
 
+    if (timerInterval) {
+      clearInterval(timerInterval);
+      timerInterval = null;
+    }
+
     participantGender = genderEl.value;
     participantYearLevel = yearEl.value;
     participantID = participantInput;
@@ -579,10 +711,14 @@ const db = firebase.firestore();
     awaitingCollect = false;
     pendingResult = null;
 
+    generateOutcomes();
     saveLocalData();
 
+    document.getElementById("setupError").style.display = "none";
     document.getElementById("setupScreen").classList.add("hidden");
     document.getElementById("testScreen").classList.remove("hidden");
+    document.getElementById("completionBox").style.display = "none";
+    document.getElementById("completionBox").innerHTML = "";
 
     updateScoreDisplay();
     updateTrialDisplay();
@@ -639,6 +775,11 @@ const db = firebase.firestore();
   }
 
   function startTimer() {
+    if (timerInterval) {
+      clearInterval(timerInterval);
+      timerInterval = null;
+    }
+
     function updateTimer() {
       if (taskEnded) return;
 
@@ -646,6 +787,7 @@ const db = firebase.firestore();
 
       if (totalSeconds <= 0) {
         clearInterval(timerInterval);
+        timerInterval = null;
         endTask();
         return;
       }
@@ -706,6 +848,54 @@ const db = firebase.firestore();
     return { url, filename };
   }
 
+  function createCSVFileFromSavedData(savedData) {
+    const headers = [
+      "participantID",
+      "gender",
+      "yearLevel",
+      "timerMinutes",
+      "trial",
+      "choice",
+      "gain",
+      "loss",
+      "net",
+      "totalScore"
+    ];
+
+    const csvRows = [headers.join(",")];
+
+    (savedData.results || []).forEach(row => {
+      csvRows.push([
+        savedData.participantID,
+        savedData.gender,
+        savedData.yearLevel,
+        savedData.timerMinutes,
+        row.trial,
+        row.choice,
+        row.gain,
+        row.loss,
+        row.net,
+        row.totalScore
+      ].join(","));
+    });
+
+    const blob = new Blob([csvRows.join("\n")], { type: "text/csv" });
+    const url = window.URL.createObjectURL(blob);
+
+    const completedTime = savedData.completedAt ? new Date(savedData.completedAt) : new Date();
+    const timestamp =
+      completedTime.getFullYear() +
+      String(completedTime.getMonth() + 1).padStart(2, "0") +
+      String(completedTime.getDate()).padStart(2, "0") + "_" +
+      String(completedTime.getHours()).padStart(2, "0") +
+      String(completedTime.getMinutes()).padStart(2, "0") +
+      String(completedTime.getSeconds()).padStart(2, "0");
+
+    const filename = `PsynalisisTest_${savedData.participantID}_${timestamp}.csv`;
+
+    return { url, filename };
+  }
+
   function triggerCSVDownload(fileURL, fileName) {
     const a = document.createElement("a");
     a.hidden = true;
@@ -718,8 +908,9 @@ const db = firebase.firestore();
 
   function chooseDeck(deck) {
     if (!timerStarted) {
-      startTimer();
       timerStarted = true;
+      saveLocalData();
+      startTimer();
     }
 
     if (trial >= nTrials || awaitingCollect || taskEnded) return;
@@ -821,43 +1012,53 @@ const db = firebase.firestore();
     await db.collection("igt_sessions").doc(participantID).set(payload);
   }
 
-async function endTask() {
-  if (taskEnded) return;
+  async function endTask() {
+    if (taskEnded) return;
 
-  taskEnded = true;
+    taskEnded = true;
 
-  setDeckButtonsEnabled(false);
-  hideResultModal();
+    setDeckButtonsEnabled(false);
+    hideResultModal();
 
-  if (timerInterval) clearInterval(timerInterval);
+    if (timerInterval) {
+      clearInterval(timerInterval);
+      timerInterval = null;
+    }
 
-  if (backupCSVUrl) {
-    window.URL.revokeObjectURL(backupCSVUrl);
-    backupCSVUrl = null;
-  }
+    if (backupCSVUrl) {
+      window.URL.revokeObjectURL(backupCSVUrl);
+      backupCSVUrl = null;
+    }
 
-  const csvFile = createCSVFile(results);
-  backupCSVUrl = csvFile.url;
+    const csvFile = createCSVFile(results);
+    backupCSVUrl = csvFile.url;
 
-  let uploadStatusText = "Cloud backup failed. Local recovery is still available on this device.";
+    saveCompletedLocalData();
 
-  try {
-    await saveToFirebase();   // AUTO-SAVE TO FIRESTORE
-    uploadStatusText = "Cloud backup saved successfully.";
+    let uploadStatusText = "Cloud backup failed. Finished data is still saved locally on this device.";
+
+    try {
+      await saveToFirebase();
+      uploadStatusText = "Cloud backup saved successfully. Finished data is also saved locally on this device.";
+    } catch (error) {
+      console.error("Firebase save failed:", error);
+    }
+
     clearLocalData();
-  } catch (error) {
-    console.error("Firebase save failed:", error);
-    saveLocalData();
+
+    triggerCSVDownload(csvFile.url, csvFile.filename);
+    showCompletionMessage(csvFile.filename, csvFile.url, uploadStatusText);
+
+    trial = nTrials;
+    updateTrialDisplay();
+    updateTimerDisplay();
   }
 
-  triggerCSVDownload(csvFile.url, csvFile.filename);   // AUTO-DOWNLOAD BACKUP
-  showCompletionMessage(csvFile.filename, csvFile.url, uploadStatusText);
-
-  trial = nTrials;
-  updateTrialDisplay();
-  updateTimerDisplay();
-}
   window.addEventListener("beforeunload", () => {
+    if (!taskEnded) {
+      saveLocalData();
+    }
+
     if (backupCSVUrl) {
       window.URL.revokeObjectURL(backupCSVUrl);
     }
@@ -865,6 +1066,7 @@ async function endTask() {
 
   updateScoreDisplay();
   updateTrialDisplay();
+  updateTimerDisplay();
 </script>
 </body>
 </html>
