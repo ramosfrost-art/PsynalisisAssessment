@@ -821,45 +821,42 @@ const db = firebase.firestore();
     await db.collection("igt_sessions").doc(participantID).set(payload);
   }
 
-  async function endTask() {
-    if (taskEnded) return;
+async function endTask() {
+  if (taskEnded) return;
 
-    taskEnded = true;
+  taskEnded = true;
 
-    setDeckButtonsEnabled(false);
-    hideResultModal();
+  setDeckButtonsEnabled(false);
+  hideResultModal();
 
-    if (timerInterval) clearInterval(timerInterval);
+  if (timerInterval) clearInterval(timerInterval);
 
-    if (backupCSVUrl) {
-      window.URL.revokeObjectURL(backupCSVUrl);
-      backupCSVUrl = null;
-    }
-
-    const csvFile = createCSVFile(results);
-    backupCSVUrl = csvFile.url;
-
-    triggerCSVDownload(csvFile.url, csvFile.filename);
-
-    let uploadStatusText = "Cloud upload was not attempted.";
-
-    try {
-      await saveToFirebase();
-      uploadStatusText = "Cloud backup saved successfully.";
-      clearLocalData();
-    } catch (error) {
-      console.error("Firebase save failed:", error);
-      uploadStatusText = "Cloud backup failed. Local recovery is still available on this device.";
-      saveLocalData();
-    }
-
-    showCompletionMessage(csvFile.filename, csvFile.url, uploadStatusText);
-
-    trial = nTrials;
-    updateTrialDisplay();
-    updateTimerDisplay();
+  if (backupCSVUrl) {
+    window.URL.revokeObjectURL(backupCSVUrl);
+    backupCSVUrl = null;
   }
 
+  const csvFile = createCSVFile(results);
+  backupCSVUrl = csvFile.url;
+
+  let uploadStatusText = "Cloud backup failed. Local recovery is still available on this device.";
+
+  try {
+    await saveToFirebase();   // AUTO-SAVE TO FIRESTORE
+    uploadStatusText = "Cloud backup saved successfully.";
+    clearLocalData();
+  } catch (error) {
+    console.error("Firebase save failed:", error);
+    saveLocalData();
+  }
+
+  triggerCSVDownload(csvFile.url, csvFile.filename);   // AUTO-DOWNLOAD BACKUP
+  showCompletionMessage(csvFile.filename, csvFile.url, uploadStatusText);
+
+  trial = nTrials;
+  updateTrialDisplay();
+  updateTimerDisplay();
+}
   window.addEventListener("beforeunload", () => {
     if (backupCSVUrl) {
       window.URL.revokeObjectURL(backupCSVUrl);
